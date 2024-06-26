@@ -8,7 +8,7 @@ select 'hello',"'hello'",'""hello""','''h''e''l''l''o''',"hel""lo",'hel\'lo';
 hello	'hello'	""hello""	'h'e'l'l'o'	hel"lo	hel'lo
 hello	'hello'	""hello""	'h'e'l'l'o'	hel"lo	hel'lo
 select 'hello' 'monty';
-hello
+hellomonty
 hellomonty
 select length('\n\t\r\b\0\_\%\\');
 length('\n\t\r\b\0\_\%\\')
@@ -5310,6 +5310,14 @@ quote(NULL)
 NULL
 DROP TABLE t1;
 DROP VIEW v1;
+#
+# MDEV-28387 UBSAN: runtime error: negation of -9223372036854775808 cannot be represented in type 'long long int'; cast to an unsigned type to negate this value to itself in my_strtoll10 on SELECT
+#
+SET @a='-9223372036854775808';
+CREATE TABLE t (c1 INT,c2 CHAR);
+SELECT SUBSTR(0,@a) FROM t;
+SUBSTR(0,@a)
+DROP TABLE t;
 #
 # End of 10.5 tests
 #

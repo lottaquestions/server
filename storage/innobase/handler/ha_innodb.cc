@@ -3860,6 +3860,21 @@ static int innodb_init_params()
 		}
 	}
 
+	ulint min_open_files_limit = srv_undo_tablespaces
+				+ srv_sys_space.m_files.size()
+				+ srv_tmp_space.m_files.size() + 1;
+	if (min_open_files_limit > innobase_open_files) {
+		sql_print_warning(
+			"InnoDB: innodb_open_files=%lu is not greater "
+			"than the number of system tablespace files, "
+			"temporary tablespace files, "
+			"innodb_undo_tablespaces=%lu; adjusting "
+			"to innodb_open_files=%zu",
+			innobase_open_files, srv_undo_tablespaces,
+			min_open_files_limit);
+		innobase_open_files = (ulong) min_open_files_limit;
+	}
+
 	srv_max_n_open_files = innobase_open_files;
 	srv_innodb_status = (ibool) innobase_create_status_file;
 
@@ -7259,26 +7274,55 @@ ha_innobase::build_template(
 
 	ulint num_v = 0;
 
-	if (active_index != MAX_KEY
-	     && active_index == pushed_idx_cond_keyno) {
-		m_prebuilt->idx_cond = this;
-		goto icp;
-	} else if (pushed_rowid_filter && rowid_filter_is_active) {
-icp:
-		/* Push down an index condition or an end_range check. */
+	/* MDEV-31154: For pushed down index condition we don't support virtual
+	column and idx_cond_push() does check for it. For row ID filtering we
+	don't need such restrictions but we get into trouble trying to use the
+	ICP path.
+
+	1. It should be fine to follow no_icp path if primary key is generated.
+	However, with user specified primary key(PK), the row is identified by
+	the PK and those columns need to be converted to mysql format in
+	row_search_idx_cond_check before doing the comparison. Since secondary
+	indexes always have PK appended in innodb, it works with current ICP
+	handling code when fetch_primary_key_cols is set to TRUE.
+
+	2. Although ICP comparison and Row ID comparison works on different
+	columns the current ICP code can be shared by both.
+
+	3. In most cases, it works today by jumping to goto no_icp when we
+	encounter a virtual column. This is hackish and already have some
+	issues as it cannot handle PK and all states are not reset properly,
+	for example, idx_cond_n_cols is not reset.
+
+	4. We already encountered MDEV-28747 m_prebuilt->idx_cond was being set.
+
+	Neither ICP nor row ID comparison needs virtual columns and the code is
+	simplified to handle both. It should handle the issues. */
+
+	const bool pushed_down = active_index != MAX_KEY
+				 && active_index == pushed_idx_cond_keyno;
+
+	m_prebuilt->idx_cond = pushed_down ? this : nullptr;
+
+	if (m_prebuilt->idx_cond || m_prebuilt->pk_filter) {
+		/* Push down an index condition, end_range check or row ID
+		filter */
 		for (ulint i = 0; i < n_fields; i++) {
 			const Field* field = table->field[i];
 			const bool is_v = !field->stored_in_db();
-			if (is_v && skip_virtual) {
-				num_v++;
-				continue;
-			}
+
 			bool index_contains = index->contains_col_or_prefix(
 				is_v ? num_v : i - num_v, is_v);
-			if (is_v && index_contains) {
-				m_prebuilt->n_template = 0;
-				num_v = 0;
-				goto no_icp;
+
+			if (is_v) {
+				if (index_contains) {
+					/* We want to ensure that ICP is not
+					used with virtual columns. */
+					ut_ad(!pushed_down);
+					m_prebuilt->idx_cond = nullptr;
+				}
+				num_v++;
+				continue;
 			}
 
 			/* Test if an end_range or an index condition
@@ -7298,7 +7342,7 @@ icp:
 			which would be acceptable if end_range==NULL. */
 			if (build_template_needs_field_in_icp(
 				    index, m_prebuilt, index_contains,
-				    is_v ? num_v : i - num_v, is_v)) {
+				    i - num_v, false)) {
 				if (!whole_row) {
 					field = build_template_needs_field(
 						index_contains,
@@ -7307,14 +7351,9 @@ icp:
 						fetch_primary_key_cols,
 						index, table, i, num_v);
 					if (!field) {
-						if (is_v) {
-							num_v++;
-						}
 						continue;
 					}
 				}
-
-				ut_ad(!is_v);
 
 				mysql_row_templ_t* templ= build_template_field(
 					m_prebuilt, clust_index, index,
@@ -7392,15 +7431,16 @@ icp:
 				*/
 			}
 
-			if (is_v) {
-				num_v++;
-			}
 		}
 
-		ut_ad(m_prebuilt->idx_cond_n_cols > 0);
-		ut_ad(m_prebuilt->idx_cond_n_cols == m_prebuilt->n_template);
-
 		num_v = 0;
+		ut_ad(m_prebuilt->idx_cond_n_cols == m_prebuilt->n_template);
+		if (m_prebuilt->idx_cond_n_cols == 0) {
+			/* No columns to push down. It is safe to jump to np ICP
+			path. */
+			m_prebuilt->idx_cond = nullptr;
+			goto no_icp;
+		}
 
 		/* Include the fields that are not needed in index condition
 		pushdown. */
@@ -7415,7 +7455,7 @@ icp:
 			bool index_contains = index->contains_col_or_prefix(
 				is_v ? num_v : i - num_v, is_v);
 
-			if (!build_template_needs_field_in_icp(
+			if (is_v || !build_template_needs_field_in_icp(
 				    index, m_prebuilt, index_contains,
 				    is_v ? num_v : i - num_v, is_v)) {
 				/* Not needed in ICP */
@@ -7448,7 +7488,7 @@ icp:
 	} else {
 no_icp:
 		/* No index condition pushdown */
-		m_prebuilt->idx_cond = NULL;
+		ut_ad(!m_prebuilt->idx_cond);
 		ut_ad(num_v == 0);
 
 		for (ulint i = 0; i < n_fields; i++) {
@@ -9786,7 +9826,8 @@ wsrep_append_foreign_key(
 	}
 
 	ulint rcode = DB_SUCCESS;
-	char  cache_key[513] = {'\0'};
+	char  cache_key[MAX_FULL_NAME_LEN] = {'\0'};
+	char  db_name[MAX_DATABASE_NAME_LEN+1] = {'\0'};
 	size_t cache_key_len = 0;
 
 	if ( !((referenced) ?
@@ -9871,14 +9912,38 @@ wsrep_append_foreign_key(
 		return DB_ERROR;
 	}
 
-	strncpy(cache_key,
+	char * fk_table =
 		(wsrep_protocol_version > 1) ?
 		((referenced) ?
 			foreign->referenced_table->name.m_name :
 			foreign->foreign_table->name.m_name) :
-		foreign->foreign_table->name.m_name, sizeof(cache_key) - 1);
-	cache_key_len = strlen(cache_key);
+		foreign->foreign_table->name.m_name;
 
+        /* convert db and table name parts separately to system charset */
+	ulint	db_name_len = dict_get_db_name_len(fk_table);
+	strmake(db_name, fk_table, db_name_len);
+	uint errors;
+	cache_key_len= innobase_convert_to_system_charset(cache_key,
+				db_name, sizeof(cache_key), &errors);
+	if (errors) {
+		WSREP_WARN("unexpected foreign key table %s %s",
+			   foreign->referenced_table->name.m_name,
+			   foreign->foreign_table->name.m_name);
+		return DB_ERROR;
+	}
+
+	/* after db name adding 0 and then converted table name */
+	cache_key[db_name_len]= '\0';
+        cache_key_len++;
+
+	cache_key_len+= innobase_convert_to_system_charset(cache_key+cache_key_len,
+				fk_table+db_name_len+1, sizeof(cache_key), &errors);
+	if (errors) {
+		WSREP_WARN("unexpected foreign key table %s %s",
+			   foreign->referenced_table->name.m_name,
+			   foreign->foreign_table->name.m_name);
+		return DB_ERROR;
+        }
 #ifdef WSREP_DEBUG_PRINT
 	ulint j;
 	fprintf(stderr, "FK parent key, table: %s %s len: %lu ",
@@ -9888,16 +9953,6 @@ wsrep_append_foreign_key(
 	}
 	fprintf(stderr, "\n");
 #endif
-	char *p = strchr(cache_key, '/');
-
-	if (p) {
-		*p = '\0';
-	} else {
-		WSREP_WARN("unexpected foreign key table %s %s",
-			   foreign->referenced_table->name.m_name,
-			   foreign->foreign_table->name.m_name);
-	}
-
 	wsrep_buf_t wkey_part[3];
         wsrep_key_t wkey = {wkey_part, 3};
 
@@ -13273,7 +13328,7 @@ ha_innobase::discard_or_import_tablespace(
 static bool frm_file_exists(const char *path)
 {
   char buff[FN_REFLEN];
-  strxnmov(buff, FN_REFLEN, path, reg_ext, NullS);
+  strxnmov(buff, sizeof(buff)-1, path, reg_ext, NullS);
   return !access(buff, F_OK);
 }
 
@@ -14438,11 +14493,13 @@ ha_innobase::info_low(
 			stats.index_file_length
 				= ulonglong(stat_sum_of_other_index_sizes)
 				* size;
-			rw_lock_s_lock(&space->latch);
-			stats.delete_length = 1024
-				* fsp_get_available_space_in_free_extents(
+			if (flag & HA_STATUS_VARIABLE_EXTRA) {
+				rw_lock_s_lock(&space->latch);
+				stats.delete_length = 1024
+					* fsp_get_available_space_in_free_extents(
 					*space);
-			rw_lock_s_unlock(&space->latch);
+				rw_lock_s_unlock(&space->latch);
+			}
 		}
 		stats.check_time = 0;
 		stats.mrr_length_per_rec= (uint)ref_length +  8; // 8 = max(sizeof(void *));

@@ -210,14 +210,14 @@ public:
     m_message[0]= '\0';
   }
 
-  virtual ~Silence_log_table_errors() = default;
+  ~Silence_log_table_errors() override = default;
 
-  virtual bool handle_condition(THD *thd,
+  bool handle_condition(THD *thd,
                                 uint sql_errno,
                                 const char* sql_state,
                                 Sql_condition::enum_warning_level *level,
                                 const char* msg,
-                                Sql_condition ** cond_hdl);
+                                Sql_condition ** cond_hdl) override;
   const char *message() const { return m_message; }
 };
 
@@ -5254,6 +5254,15 @@ MYSQL_BIN_LOG::is_xidlist_idle_nolock()
   return true;
 }
 
+#ifdef WITH_WSREP
+static bool is_gtid_written_on_trans_start(const THD *thd)
+{
+  return wsrep_on(thd) &&
+      (thd->variables.gtid_seq_no || thd->variables.wsrep_gtid_seq_no) &&
+      (thd->wsrep_cs().mode() == wsrep::client_state::m_local);
+}
+#endif
+
 /**
   Create a new log file name.
 
@@ -5893,10 +5902,7 @@ THD::binlog_start_trans_and_stmt()
     Ha_trx_info *ha_info;
     ha_info= this->ha_data[binlog_hton->slot].ha_info + (mstmt_mode ? 1 : 0);
 
-    if (!ha_info->is_started() && 
-        (this->variables.gtid_seq_no || this->variables.wsrep_gtid_seq_no) &&
-        wsrep_on(this) && 
-        (this->wsrep_cs().mode() == wsrep::client_state::m_local))
+    if (!ha_info->is_started() && is_gtid_written_on_trans_start(this))
     {
       uchar *buf= 0;
       size_t len= 0;

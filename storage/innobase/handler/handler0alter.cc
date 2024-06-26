@@ -1013,7 +1013,7 @@ struct ha_innobase_inplace_ctx : public inplace_alter_handler_ctx
 			prebuilt);
 	}
 
-	~ha_innobase_inplace_ctx()
+	~ha_innobase_inplace_ctx() override
 	{
 		UT_DELETE(m_stage);
 		if (instant_table) {
@@ -1122,7 +1122,7 @@ struct ha_innobase_inplace_ctx : public inplace_alter_handler_ctx
 
 	/** Share context between partitions.
 	@param[in] ctx	context from another partition of the table */
-	void set_shared_data(const inplace_alter_handler_ctx& ctx)
+	void set_shared_data(const inplace_alter_handler_ctx& ctx) override
 	{
 		if (add_autoinc != ULINT_UNDEFINED) {
 			const ha_innobase_inplace_ctx& ha_ctx =
@@ -1536,11 +1536,9 @@ instant_alter_column_possible(
 			ut_ad(!is_null || nullable);
 			n_nullable += nullable;
 			n_add++;
-			uint l;
+			uint l = (*af)->pack_length();
 			switch ((*af)->type()) {
 			case MYSQL_TYPE_VARCHAR:
-				l = reinterpret_cast<const Field_varstring*>
-					(*af)->get_length();
 			variable_length:
 				if (l >= min_local_len) {
 					max_size += blob_prefix
@@ -1554,7 +1552,6 @@ instant_alter_column_possible(
 					if (!is_null) {
 						min_size += l;
 					}
-					l = (*af)->pack_length();
 					max_size += l;
 					lenlen += l > 255 ? 2 : 1;
 				}
@@ -1568,7 +1565,6 @@ instant_alter_column_possible(
 					((*af))->get_length();
 				goto variable_length;
 			default:
-				l = (*af)->pack_length();
 				if (l > 255 && ib_table.not_redundant()) {
 					goto variable_length;
 				}
@@ -8340,6 +8336,15 @@ field_changed:
 		     & ALTER_ADD_VIRTUAL_COLUMN)
 		    && prepare_inplace_add_virtual(
 			    ha_alter_info, altered_table, table)) {
+			DBUG_RETURN(true);
+		}
+
+		if ((ha_alter_info->handler_flags & ALTER_OPTIONS)
+		    && ctx->page_compression_level
+		    && !ctx->old_table->not_redundant()) {
+			my_error(ER_ILLEGAL_HA_CREATE_OPTION, MYF(0),
+				 table_type(),
+				 "PAGE_COMPRESSED=1 ROW_FORMAT=REDUNDANT");
 			DBUG_RETURN(true);
 		}
 

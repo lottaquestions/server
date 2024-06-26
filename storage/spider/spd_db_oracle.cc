@@ -18,17 +18,12 @@
 #include <my_global.h>
 #include "mysql_version.h"
 #include "spd_environ.h"
-#if MYSQL_VERSION_ID < 50500
-#include "mysql_priv.h"
-#include <mysql/plugin.h>
-#else
 #include "sql_priv.h"
 #include "probes_mysql.h"
 #include "sql_partition.h"
 #include "sql_analyse.h"
 #ifdef HANDLER_HAS_DIRECT_AGGREGATE
 #include "sql_select.h"
-#endif
 #endif
 
 #ifdef HAVE_ORACLE_OCI
@@ -337,7 +332,7 @@ SPIDER_DBTON spider_dbton_oracle = {
   spider_oracle_create_conn,
   spider_oracle_support_direct_join,
   &spider_db_oracle_utility,
-  "For communicating Oracle using native protocol",
+  "For communication with Oracle using the native protocol",
   "1.0.0",
   SPIDER_MATURITY_BETA
 };
@@ -2254,96 +2249,6 @@ int spider_db_oracle::show_master_status(
   DBUG_RETURN(0);
 }
 
-#if defined(HS_HAS_SQLCOM) && defined(HAVE_HANDLERSOCKET)
-int spider_db_oracle::append_sql(
-  char *sql,
-  ulong sql_length,
-  st_spider_db_request_key *request_key
-) {
-  DBUG_ENTER("spider_db_oracle::append_sql");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-int spider_db_oracle::append_open_handler(
-  uint handler_id,
-  const char *db_name,
-  const char *table_name,
-  const char *index_name,
-  const char *sql,
-  st_spider_db_request_key *request_key
-) {
-  DBUG_ENTER("spider_db_oracle::append_sql");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-int spider_db_oracle::append_select(
-  uint handler_id,
-  spider_string *sql,
-  SPIDER_DB_HS_STRING_REF_BUFFER *keys,
-  int limit,
-  int skip,
-  st_spider_db_request_key *request_key
-) {
-  DBUG_ENTER("spider_db_oracle::append_select");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-int spider_db_oracle::append_insert(
-  uint handler_id,
-  SPIDER_DB_HS_STRING_REF_BUFFER *upds,
-  st_spider_db_request_key *request_key
-) {
-  DBUG_ENTER("spider_db_oracle::append_insert");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-int spider_db_oracle::append_update(
-  uint handler_id,
-  spider_string *sql,
-  SPIDER_DB_HS_STRING_REF_BUFFER *keys,
-  SPIDER_DB_HS_STRING_REF_BUFFER *upds,
-  int limit,
-  int skip,
-  bool increment,
-  bool decrement,
-  st_spider_db_request_key *request_key
-) {
-  DBUG_ENTER("spider_db_oracle::append_update");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-int spider_db_oracle::append_delete(
-  uint handler_id,
-  spider_string *sql,
-  SPIDER_DB_HS_STRING_REF_BUFFER *keys,
-  int limit,
-  int skip,
-  st_spider_db_request_key *request_key
-) {
-  DBUG_ENTER("spider_db_oracle::append_delete");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-void spider_db_oracle::reset_request_queue()
-{
-  DBUG_ENTER("spider_db_oracle::reset_request_queue");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_VOID_RETURN;
-}
-#endif
 
 size_t spider_db_oracle::escape_string(
   char *to,
@@ -3430,14 +3335,13 @@ int spider_db_oracle_util::open_item_func(
             alias, alias_length, dbton_id, use_fields, fields));
         } else if (!strncasecmp("timestampdiff", func_name, func_name_length))
         {
-#ifdef ITEM_FUNC_TIMESTAMPDIFF_ARE_PUBLIC
           Item_func_timestamp_diff *item_func_timestamp_diff =
             (Item_func_timestamp_diff *) item_func;
           if (str)
           {
             const char *interval_str;
             uint interval_len;
-            switch (item_func_timestamp_diff->int_type)
+            switch (item_func_timestamp_diff->get_int_type())
             {
               case INTERVAL_YEAR:
                 interval_str = SPIDER_SQL_YEAR_STR;
@@ -3509,9 +3413,6 @@ int spider_db_oracle_util::open_item_func(
               SPIDER_SQL_CLOSE_PAREN_LEN);
           }
           DBUG_RETURN(0);
-#else
-          DBUG_RETURN(ER_SPIDER_COND_SKIP_NUM);
-#endif
         }
       } else if (func_name_length == 14)
       {
@@ -3553,11 +3454,7 @@ int spider_db_oracle_util::open_item_func(
                 DBUG_RETURN(HA_ERR_OUT_OF_MEM);
               str->q_append(SPIDER_SQL_CAST_STR, SPIDER_SQL_CAST_LEN);
             }
-#if MYSQL_VERSION_ID < 50500
-            item_func->print(tmp_str.get_str(), QT_IS);
-#else
             item_func->print(tmp_str.get_str(), QT_TO_SYSTEM_CHARSET);
-#endif
             tmp_str.mem_calc();
             if (tmp_str.reserve(1))
               DBUG_RETURN(HA_ERR_OUT_OF_MEM);
@@ -3687,11 +3584,7 @@ int spider_db_oracle_util::open_item_func(
                 DBUG_RETURN(HA_ERR_OUT_OF_MEM);
               str->q_append(SPIDER_SQL_CAST_STR, SPIDER_SQL_CAST_LEN);
             }
-#if MYSQL_VERSION_ID < 50500
-            item_func->print(tmp_str.get_str(), QT_IS);
-#else
             item_func->print(tmp_str.get_str(), QT_TO_SYSTEM_CHARSET);
-#endif
             tmp_str.mem_calc();
             if (tmp_str.reserve(1))
               DBUG_RETURN(HA_ERR_OUT_OF_MEM);
@@ -3977,11 +3870,7 @@ int spider_db_oracle_util::open_item_func(
               DBUG_RETURN(HA_ERR_OUT_OF_MEM);
             str->q_append(SPIDER_SQL_CAST_STR, SPIDER_SQL_CAST_LEN);
           }
-#if MYSQL_VERSION_ID < 50500
-          item_func->print(tmp_str.get_str(), QT_IS);
-#else
           item_func->print(tmp_str.get_str(), QT_TO_SYSTEM_CHARSET);
-#endif
           tmp_str.mem_calc();
           if (tmp_str.reserve(1))
             DBUG_RETURN(HA_ERR_OUT_OF_MEM);
@@ -4113,11 +4002,7 @@ int spider_db_oracle_util::open_item_func(
       last_str = SPIDER_SQL_CLOSE_PAREN_STR;
       last_str_length = SPIDER_SQL_CLOSE_PAREN_LEN;
       break;
-#ifdef MARIADB_BASE_VERSION
     case Item_func::XOR_FUNC:
-#else
-    case Item_func::COND_XOR_FUNC:
-#endif
       if (str)
         str->length(str->length() - SPIDER_SQL_OPEN_PAREN_LEN);
       DBUG_RETURN(
@@ -5618,9 +5503,6 @@ int spider_oracle_handler::init()
       oracle_share->db_table_str_hash_value[roop_count];
 #endif
   }
-#if defined(HS_HAS_SQLCOM) && defined(HAVE_HANDLERSOCKET)
-  hs_upds.init();
-#endif
   DBUG_RETURN(0);
 }
 
@@ -6389,77 +6271,6 @@ int spider_oracle_handler::append_delete(
   DBUG_RETURN(0);
 }
 
-#if defined(HS_HAS_SQLCOM) && defined(HAVE_HANDLERSOCKET)
-#ifdef HANDLER_HAS_DIRECT_UPDATE_ROWS
-int spider_oracle_handler::append_increment_update_set_part()
-{
-  int error_num;
-  DBUG_ENTER("spider_oracle_handler::append_increment_update_set_part");
-  DBUG_PRINT("info",("spider this=%p", this));
-  error_num = append_increment_update_set(&update_sql);
-  DBUG_RETURN(error_num);
-}
-
-int spider_oracle_handler::append_increment_update_set(
-  spider_string *str
-) {
-  uint field_name_length;
-  uint roop_count;
-  Field *field;
-  DBUG_ENTER("spider_oracle_handler::append_increment_update_set");
-  if (str->reserve(SPIDER_SQL_SET_LEN))
-    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
-  str->q_append(SPIDER_SQL_SET_STR, SPIDER_SQL_SET_LEN);
-  const SPIDER_HS_STRING_REF *value = hs_upds.ptr();
-  for (roop_count = 0; roop_count < hs_upds.size();
-    roop_count++)
-  {
-    DBUG_PRINT("info",("spider value_size[%u]=%zu", roop_count,
-      value[roop_count].size()));
-#ifndef DBUG_OFF
-    char print_buf[MAX_FIELD_WIDTH];
-    if (value[roop_count].size() < MAX_FIELD_WIDTH)
-    {
-      memcpy(print_buf, value[roop_count].begin(), value[roop_count].size());
-      print_buf[value[roop_count].size()] = '\0';
-      DBUG_PRINT("info",("spider value[%u]=%s", roop_count, print_buf));
-    }
-#endif
-    if (
-      value[roop_count].size() == 1 &&
-      *(value[roop_count].begin()) == '0'
-    )
-      continue;
-
-    Field *top_table_field =
-      spider->get_top_table_field(spider->hs_pushed_ret_fields[roop_count]);
-    if (!(field = spider->field_exchange(top_table_field)))
-      continue;
-    field_name_length =
-      oracle_share->column_name_str[field->field_index].length();
-
-    if (str->reserve(field_name_length * 2 + /* SPIDER_SQL_NAME_QUOTE_LEN */
-      4 + SPIDER_SQL_EQUAL_LEN + SPIDER_SQL_HS_INCREMENT_LEN +
-      SPIDER_SQL_COMMA_LEN + value[roop_count].size()))
-      DBUG_RETURN(HA_ERR_OUT_OF_MEM);
-
-    oracle_share->append_column_name(str, field->field_index);
-    str->q_append(SPIDER_SQL_EQUAL_STR, SPIDER_SQL_EQUAL_LEN);
-    oracle_share->append_column_name(str, field->field_index);
-    if (spider->hs_increment)
-      str->q_append(SPIDER_SQL_HS_INCREMENT_STR,
-        SPIDER_SQL_HS_INCREMENT_LEN);
-    else
-      str->q_append(SPIDER_SQL_HS_DECREMENT_STR,
-        SPIDER_SQL_HS_DECREMENT_LEN);
-    str->q_append(value[roop_count].begin(), value[roop_count].size());
-    str->q_append(SPIDER_SQL_COMMA_STR, SPIDER_SQL_COMMA_LEN);
-  }
-  str->length(str->length() - SPIDER_SQL_COMMA_LEN);
-  DBUG_RETURN(0);
-}
-#endif
-#endif
 
 int spider_oracle_handler::append_update_set_part()
 {
@@ -6545,13 +6356,6 @@ int spider_oracle_handler::append_direct_update_set_part()
 int spider_oracle_handler::append_direct_update_set(
   spider_string *str
 ) {
-#if defined(HS_HAS_SQLCOM) && defined(HAVE_HANDLERSOCKET)
-  uint field_name_length;
-  SPIDER_SHARE *share = spider->share;
-#ifndef DBUG_OFF
-  TABLE *table = spider->get_table();
-#endif
-#endif
   DBUG_ENTER("spider_oracle_handler::append_direct_update_set");
   if (
     spider->direct_update_kinds == SPIDER_SQL_KIND_SQL &&
@@ -6566,61 +6370,7 @@ int spider_oracle_handler::append_direct_update_set(
   if (
     (spider->direct_update_kinds & SPIDER_SQL_KIND_SQL)
   ) {
-#if defined(HS_HAS_SQLCOM) && defined(HAVE_HANDLERSOCKET)
-    size_t roop_count;
-    Field *field;
-    if (str->reserve(SPIDER_SQL_SET_LEN))
-      DBUG_RETURN(HA_ERR_OUT_OF_MEM);
-    str->q_append(SPIDER_SQL_SET_STR, SPIDER_SQL_SET_LEN);
-    for (roop_count = 0; roop_count < spider->hs_pushed_ret_fields_num;
-      roop_count++)
-    {
-      Field *top_table_field =
-        spider->get_top_table_field(spider->hs_pushed_ret_fields[roop_count]);
-      if (!(field = spider->field_exchange(top_table_field)))
-        continue;
-      field_name_length =
-        oracle_share->column_name_str[field->field_index].length();
-      if (top_table_field->is_null())
-      {
-        if (str->reserve(field_name_length + /* SPIDER_SQL_NAME_QUOTE_LEN */
-          2 + SPIDER_SQL_EQUAL_LEN + SPIDER_SQL_NULL_LEN +
-          SPIDER_SQL_COMMA_LEN))
-          DBUG_RETURN(HA_ERR_OUT_OF_MEM);
-        oracle_share->append_column_name(str, field->field_index);
-        str->q_append(SPIDER_SQL_EQUAL_STR, SPIDER_SQL_EQUAL_LEN);
-        str->q_append(SPIDER_SQL_NULL_STR, SPIDER_SQL_NULL_LEN);
-      } else {
-        if (str->reserve(field_name_length + /* SPIDER_SQL_NAME_QUOTE_LEN */
-          2 + SPIDER_SQL_EQUAL_LEN))
-          DBUG_RETURN(HA_ERR_OUT_OF_MEM);
-        oracle_share->append_column_name(str, field->field_index);
-        str->q_append(SPIDER_SQL_EQUAL_STR, SPIDER_SQL_EQUAL_LEN);
-#ifndef DBUG_OFF
-        my_bitmap_map *tmp_map = dbug_tmp_use_all_columns(table,
-          table->read_set);
-#endif
-        if (
-          spider_db_oracle_utility.
-            append_column_value(spider, str, top_table_field, NULL,
-              share->access_charset) ||
-          str->reserve(SPIDER_SQL_COMMA_LEN)
-        ) {
-#ifndef DBUG_OFF
-          dbug_tmp_restore_column_map(table->read_set, tmp_map);
-#endif
-          DBUG_RETURN(HA_ERR_OUT_OF_MEM);
-        }
-#ifndef DBUG_OFF
-        dbug_tmp_restore_column_map(table->read_set, tmp_map);
-#endif
-      }
-      str->q_append(SPIDER_SQL_COMMA_STR, SPIDER_SQL_COMMA_LEN);
-    }
-    str->length(str->length() - SPIDER_SQL_COMMA_LEN);
-#else
     DBUG_ASSERT(0);
-#endif
   }
   DBUG_RETURN(0);
 }
@@ -10460,11 +10210,7 @@ int spider_oracle_handler::bulk_tmp_table_rnd_next()
   int error_num;
   DBUG_ENTER("spider_oracle_handler::bulk_tmp_table_rnd_next");
   DBUG_PRINT("info",("spider this=%p", this));
-#if defined(MARIADB_BASE_VERSION) && MYSQL_VERSION_ID >= 50200
   error_num = upd_tmp_tbl->file->ha_rnd_next(upd_tmp_tbl->record[0]);
-#else
-  error_num = upd_tmp_tbl->file->rnd_next(upd_tmp_tbl->record[0]);
-#endif
   if (!error_num)
   {
     error_num = restore_sql_from_bulk_tmp_table(&insert_sql, upd_tmp_tbl);
@@ -10756,53 +10502,6 @@ int spider_oracle_handler::reset_sql(
   DBUG_RETURN(0);
 }
 
-#if defined(HS_HAS_SQLCOM) && defined(HAVE_HANDLERSOCKET)
-int spider_oracle_handler::reset_keys(
-  ulong sql_type
-) {
-  DBUG_ENTER("spider_oracle_handler::reset_keys");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-int spider_oracle_handler::reset_upds(
-  ulong sql_type
-) {
-  DBUG_ENTER("spider_oracle_handler::reset_upds");
-  DBUG_PRINT("info",("spider this=%p", this));
-  hs_upds.clear();
-  DBUG_RETURN(0);
-}
-
-int spider_oracle_handler::reset_strs(
-  ulong sql_type
-) {
-  DBUG_ENTER("spider_oracle_handler::reset_strs");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-int spider_oracle_handler::reset_strs_pos(
-  ulong sql_type
-) {
-  DBUG_ENTER("spider_oracle_handler::reset_strs_pos");
-  DBUG_PRINT("info",("spider this=%p", this));
-  DBUG_ASSERT(0);
-  DBUG_RETURN(0);
-}
-
-int spider_oracle_handler::push_back_upds(
-  SPIDER_HS_STRING_REF &info
-) {
-  int error_num;
-  DBUG_ENTER("spider_oracle_handler::push_back_upds");
-  DBUG_PRINT("info",("spider this=%p", this));
-  error_num = hs_upds.push_back(info);
-  DBUG_RETURN(error_num);
-}
-#endif
 
 bool spider_oracle_handler::need_lock_before_set_sql_for_exec(
   ulong sql_type
